@@ -6,7 +6,8 @@ from aws_cdk import (
     # Duration,
     Stack,
     aws_ec2 as ec2,
-    aws_iam as iam
+    aws_iam as iam,
+    aws_rds as rds
     # aws_sqs as sqs,
 )
 
@@ -26,7 +27,38 @@ class CdkLabWebServerStack(Stack):
 
         InstanceRole.add_managed_policy(iam.ManagedPolicy.from_aws_managed_policy_name("AmazonSSMManagedInstanceCore"))
         
-        # Create an EC2 instance
+        # Security Group for Web Servers
+        web_sg = ec2.SecurityGroup(self, "WebServerSG", vpc=cdk_lab_vpc, description="Allow HTTP traffic to web servers")
+        web_sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(80), "Allow HTTP from anywhere")
+
+        # Create EC2 instances in public subnets
+        for i, subnet in enumerate(cdk_lab_vpc.public_subnets):
+            ec2.Instance(self, f"WebServer{i + 1}", 
+                         vpc=cdk_lab_vpc,
+                         instance_type=ec2.InstanceType("t2.micro"),
+                         machine_image=ec2.AmazonLinuxImage(generation=ec2.AmazonLinuxGeneration.AMAZON_LINUX_2),
+                         role=InstanceRole,
+                         security_group=web_sg)
+
+        # Security Group for RDS
+        rds_sg = ec2.SecurityGroup(self, "RDSSG", vpc=cdk_lab_vpc, description="Allow MySQL traffic from web servers")
+        rds_sg.add_ingress_rule(web_sg, ec2.Port.tcp(3306), "Allow MySQL from web servers")
+
+        # Create RDS Instance
+        rds_instance = rds.DatabaseInstance(self, "MyRDS",
+            engine=rds.DatabaseInstanceEngine.mysql(version=rds.MysqlEngineVersion.VER_8_0),
+            instance_type=ec2.InstanceType("t2.micro"),
+            vpc=cdk_lab_vpc,
+            vpc_subnets={"subnet_type": ec2.SubnetType.PRIVATE_WITH_NAT},
+            security_groups=[rds_sg],
+            multi_az=False,
+            allocated_storage=20,
+            storage_type=rds.StorageType.GP2,
+            deletion_protection=False,
+            database_name="MyDatabase"
+        )
+
+        """  # Create an EC2 instance
         cdk_lab_web_instance = ec2.Instance(self, "cdk_lab_web_instance", vpc=cdk_lab_vpc,
                                             instance_type=ec2.InstanceType("t2.micro"),
                                             machine_image=ec2.AmazonLinuxImage(generation=ec2.AmazonLinuxGeneration.AMAZON_LINUX_2),
@@ -47,4 +79,4 @@ class CdkLabWebServerStack(Stack):
         webinitscriptasset.grant_read(cdk_lab_web_instance.role)
         
         # Allow inbound HTTP traffic in security groups
-        cdk_lab_web_instance.connections.allow_from_any_ipv4(ec2.Port.tcp(80))
+        cdk_lab_web_instance.connections.allow_from_any_ipv4(ec2.Port.tcp(80)) """
